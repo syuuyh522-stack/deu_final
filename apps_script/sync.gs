@@ -30,16 +30,21 @@ const STUDENTS = [
 ];
 
 // ─── 메뉴 등록 (시트 열릴 때 자동 실행) ──────────
+// ※ 이 함수는 직접 실행하지 마세요. 저장 후 구글 시트를 새로고침하면 자동 실행됩니다.
 function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu("📊 점수 동기화")
-    .addItem("🔄 지금 동기화", "syncAll")
-    .addSeparator()
-    .addItem("🔍 Tally 필드명 확인", "inspectFields")
-    .addSeparator()
-    .addItem("⏰ 자동 동기화 켜기 (10분마다)", "setupTrigger")
-    .addItem("⏹ 자동 동기화 끄기", "removeTriggers")
-    .addToUi();
+  try {
+    SpreadsheetApp.getUi()
+      .createMenu("📊 점수 동기화")
+      .addItem("🔄 지금 동기화", "syncAll")
+      .addSeparator()
+      .addItem("🔍 Tally 필드명 확인", "inspectFields")
+      .addSeparator()
+      .addItem("⏰ 자동 동기화 켜기 (10분마다)", "setupTrigger")
+      .addItem("⏹ 자동 동기화 끄기", "removeTriggers")
+      .addToUi();
+  } catch (e) {
+    // 스크립트 에디터에서 직접 실행 시 무시
+  }
 }
 
 // ─── Tally API 호출 ───────────────────────────────
