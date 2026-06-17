@@ -194,24 +194,25 @@ function updateTeamScores(ss, submissions) {
 // ─── 메인 동기화 ──────────────────────────────────
 function syncAll() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  ss.toast("Tally에서 데이터 가져오는 중...", "📊 동기화", 60);
 
+  try { ss.toast("Tally에서 데이터 가져오는 중...", "📊 동기화", 60); } catch(_) {}
+
+  Logger.log("=== 동기화 시작 ===");
+
+  const peerSubs = fetchSubmissions(FORM_PEER_EVAL);
+  Logger.log(`팀원 평가표: ${peerSubs.length}건`);
+  saveRawPeer(ss, peerSubs);
+  updatePeerScores(ss, peerSubs);
+
+  const teamSubs = fetchSubmissions(FORM_TEAM_EVAL);
+  Logger.log(`팀별 평가표: ${teamSubs.length}건`);
+  saveRawTeam(ss, teamSubs);
+  updateTeamScores(ss, teamSubs);
+
+  Logger.log("=== 동기화 완료 ===");
   try {
-    const peerSubs = fetchSubmissions(FORM_PEER_EVAL);
-    saveRawPeer(ss, peerSubs);
-    updatePeerScores(ss, peerSubs);
-
-    const teamSubs = fetchSubmissions(FORM_TEAM_EVAL);
-    saveRawTeam(ss, teamSubs);
-    updateTeamScores(ss, teamSubs);
-
-    ss.toast(
-      `팀원 평가 ${peerSubs.length}건 · 팀별 평가 ${teamSubs.length}건 완료`,
-      "✅ 동기화 완료", 5
-    );
-  } catch (e) {
-    SpreadsheetApp.getUi().alert(`오류:\n${e.message}`);
-  }
+    ss.toast(`팀원 평가 ${peerSubs.length}건 · 팀별 평가 ${teamSubs.length}건 완료`, "✅ 완료", 5);
+  } catch(_) {}
 }
 
 // ─── Tally 필드명 확인 ────────────────────────────
