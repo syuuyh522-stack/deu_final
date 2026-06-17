@@ -1,21 +1,13 @@
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// 동의대학교 미인디 기말평가 — Tally 자동 동기화
-// [사용법] 구글 시트 → 확장 프로그램 → Apps Script
-//          → 이 코드 전체 붙여넣기 → 저장 → 새로고침
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-// ─── 설정 ─────────────────────────────────────────
 const TALLY_TOKEN    = "tly-xHfYqWNwxaATbpbg0GHsLlPBP5LKjb1P";
-const FORM_PEER_EVAL = "VLNBql";  // 팀원 평가표
-const FORM_TEAM_EVAL = "q4zGOO";  // 팀별 평가표
+const SPREADSHEET_ID = "1tqihK7NxqEEqohQqFlDsjNMXz531K1cpCtwRvni2uk8";
+const FORM_PEER_EVAL = "VLNBql";
+const FORM_TEAM_EVAL = "q4zGOO";
 
-// Tally 질문 제목 키워드 — 필드명 확인 메뉴 실행 후 맞게 수정
 const PEER_FIELD_EVALUATEE = "평가 대상";
 const PEER_FIELD_SCORE     = "점수";
 const TEAM_FIELD_TARGET    = "평가 조";
 const TEAM_FIELD_EVALUATOR = "본인 조";
 const TEAM_FIELD_SCORE     = "점수";
-// ──────────────────────────────────────────────────
 
 const STUDENTS = [
   [1,"박채운"],[1,"천하영"],[1,"함준우"],
@@ -29,8 +21,6 @@ const STUDENTS = [
   [9,"차아영"],[9,"최고운"],
 ];
 
-// ─── 메뉴 등록 (시트 열릴 때 자동 실행) ──────────
-// ※ 이 함수는 직접 실행하지 마세요. 저장 후 구글 시트를 새로고침하면 자동 실행됩니다.
 function onOpen() {
   try {
     SpreadsheetApp.getUi()
@@ -42,211 +32,43 @@ function onOpen() {
       .addItem("⏰ 자동 동기화 켜기 (10분마다)", "setupTrigger")
       .addItem("⏹ 자동 동기화 끄기", "removeTriggers")
       .addToUi();
-  } catch (e) {
-    // 스크립트 에디터에서 직접 실행 시 무시
-  }
+  } catch(e) {}
 }
 
-// ─── Tally API 호출 ───────────────────────────────
 function fetchSubmissions(formId) {
-  const allSubs = [];
-  let page = 1;
-
+  var allSubs = [];
+  var page = 1;
   while (true) {
-    const url  = `https://api.tally.so/forms/${formId}/submissions?limit=200&page=${page}`;
-    const resp = UrlFetchApp.fetch(url, {
+    var url  = "https://api.tally.so/forms/" + formId + "/submissions?limit=200&page=" + page;
+    var resp = UrlFetchApp.fetch(url, {
       method: "GET",
-      headers: { Authorization: `Bearer ${TALLY_TOKEN}` },
+      headers: { Authorization: "Bearer " + TALLY_TOKEN },
       muteHttpExceptions: true,
     });
-
     if (resp.getResponseCode() !== 200) {
-      throw new Error(`Tally API 오류 (${resp.getResponseCode()}): ${resp.getContentText()}`);
+      throw new Error("Tally API 오류 (" + resp.getResponseCode() + "): " + resp.getContentText());
     }
-
-    const data = JSON.parse(resp.getContentText());
-    allSubs.push(...(data.submissions || []).filter(s => s.isCompleted));
+    var data = JSON.parse(resp.getContentText());
+    var subs = (data.submissions || []).filter(function(s){ return s.isCompleted; });
+    allSubs = allSubs.concat(subs);
     if (!data.hasMore) break;
     page++;
   }
-
   return allSubs;
 }
 
 function findValue(fields, keyword) {
-  const kw = keyword.toLowerCase();
-  for (const f of fields) {
-    if (f.label && f.label.toLowerCase().includes(kw)) {
-      const val = f.value;
-      return Array.isArray(val) ? (val[0] ?? null) : val;
+  var kw = keyword.toLowerCase();
+  for (var i = 0; i < fields.length; i++) {
+    var f = fields[i];
+    if (f.label && f.label.toLowerCase().indexOf(kw) !== -1) {
+      var val = f.value;
+      return Array.isArray(val) ? (val[0] !== undefined ? val[0] : null) : val;
     }
   }
   return null;
 }
 
-// ─── 로우 데이터 저장 ─────────────────────────────
-function saveRawPeer(ss, submissions) {
-  const ws   = getOrCreateSheet(ss, "팀원평가_로우");
-  const rows = [["번호", "제출시간", "피평가자", "점수 (1~5)"]];
-
-  submissions.forEach((sub, i) => {
-    const f = sub.fields || [];
-    rows.push([
-      i + 1,
-      (sub.createdAt || "").replace("T", " ").slice(0, 19),
-      findValue(f, PEER_FIELD_EVALUATEE) ?? "",
-      findValue(f, PEER_FIELD_SCORE)     ?? "",
-    ]);
-  });
-
-  ws.clearContents();
-  ws.getRange(1, 1, rows.length, 4).setValues(rows);
-  styleHeader(ws, 4);
-}
-
-function saveRawTeam(ss, submissions) {
-  const ws   = getOrCreateSheet(ss, "팀별평가_로우");
-  const rows = [["번호", "제출시간", "평가자 조", "평가 대상 조", "점수 (1~5)", "비고"]];
-
-  submissions.forEach((sub, i) => {
-    const f         = sub.fields || [];
-    const target    = findValue(f, TEAM_FIELD_TARGET)    ?? "";
-    const evaluator = findValue(f, TEAM_FIELD_EVALUATOR) ?? "";
-    const score     = findValue(f, TEAM_FIELD_SCORE)     ?? "";
-    rows.push([
-      i + 1,
-      (sub.createdAt || "").replace("T", " ").slice(0, 19),
-      evaluator,
-      target,
-      score,
-      String(evaluator) === String(target) ? "자기평가 제외" : "",
-    ]);
-  });
-
-  ws.clearContents();
-  ws.getRange(1, 1, rows.length, 6).setValues(rows);
-  styleHeader(ws, 6);
-}
-
-// ─── 집계 → 시트 업데이트 ─────────────────────────
-function updatePeerScores(ss, submissions) {
-  const scores = {};
-  let unmatched = 0;
-
-  submissions.forEach(sub => {
-    const f         = sub.fields || [];
-    const evaluatee = findValue(f, PEER_FIELD_EVALUATEE);
-    const scoreRaw  = findValue(f, PEER_FIELD_SCORE);
-    if (evaluatee && scoreRaw !== null && scoreRaw !== "") {
-      const score = parseFloat(scoreRaw);
-      if (!isNaN(score)) {
-        scores[evaluatee] = scores[evaluatee] || [];
-        scores[evaluatee].push(score);
-      }
-    } else {
-      unmatched++;
-    }
-  });
-
-  if (unmatched) Logger.log(`팀원 평가 매핑 실패: ${unmatched}건`);
-
-  const ws = ss.getSheetByName("최종점수");
-  STUDENTS.forEach(([, name], i) => {
-    const arr = scores[name] || [];
-    const avg = arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length*100)/100 : "";
-    ws.getRange(6 + i, 3).setValue(avg);
-  });
-}
-
-function updateTeamScores(ss, submissions) {
-  const scores = {};
-  let unmatched = 0;
-
-  submissions.forEach(sub => {
-    const f         = sub.fields || [];
-    const targetRaw = findValue(f, TEAM_FIELD_TARGET);
-    const evalRaw   = findValue(f, TEAM_FIELD_EVALUATOR);
-    const scoreRaw  = findValue(f, TEAM_FIELD_SCORE);
-
-    if (targetRaw && scoreRaw !== null && scoreRaw !== "") {
-      const target    = parseInt(targetRaw);
-      const evaluator = evalRaw ? parseInt(evalRaw) : null;
-      const score     = parseFloat(scoreRaw);
-      if (!isNaN(target) && !isNaN(score) && evaluator !== target) {
-        scores[target] = scores[target] || [];
-        scores[target].push(score);
-      }
-    } else {
-      unmatched++;
-    }
-  });
-
-  if (unmatched) Logger.log(`팀별 평가 매핑 실패: ${unmatched}건`);
-
-  const ws = ss.getSheetByName("팀점수입력");
-  for (let i = 1; i <= 9; i++) {
-    const arr = scores[i] || [];
-    const avg = arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length*100)/100 : "";
-    ws.getRange(3 + i, 6).setValue(avg);
-  }
-}
-
-// ─── 메인 동기화 ──────────────────────────────────
-function syncAll() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-
-  try { ss.toast("Tally에서 데이터 가져오는 중...", "📊 동기화", 60); } catch(_) {}
-
-  Logger.log("=== 동기화 시작 ===");
-
-  const peerSubs = fetchSubmissions(FORM_PEER_EVAL);
-  Logger.log(`팀원 평가표: ${peerSubs.length}건`);
-  saveRawPeer(ss, peerSubs);
-  updatePeerScores(ss, peerSubs);
-
-  const teamSubs = fetchSubmissions(FORM_TEAM_EVAL);
-  Logger.log(`팀별 평가표: ${teamSubs.length}건`);
-  saveRawTeam(ss, teamSubs);
-  updateTeamScores(ss, teamSubs);
-
-  Logger.log("=== 동기화 완료 ===");
-  try {
-    ss.toast(`팀원 평가 ${peerSubs.length}건 · 팀별 평가 ${teamSubs.length}건 완료`, "✅ 완료", 5);
-  } catch(_) {}
-}
-
-// ─── Tally 필드명 확인 ────────────────────────────
-function inspectFields() {
-  const ui = SpreadsheetApp.getUi();
-  let report = "각 폼의 실제 질문 제목 목록입니다.\n상단 설정의 키워드와 비교해 수정하세요.\n";
-
-  for (const [formId, formName] of [[FORM_PEER_EVAL,"팀원 평가표"],[FORM_TEAM_EVAL,"팀별 평가표"]]) {
-    report += `\n▶ ${formName}\n`;
-    const subs = fetchSubmissions(formId);
-    if (!subs.length) { report += "  응답 없음\n"; continue; }
-    report += `  응답 ${subs.length}건\n`;
-    (subs[0].fields || []).forEach(f => {
-      report += `  • "${f.label}" → ${JSON.stringify(f.value)}\n`;
-    });
-  }
-
-  ui.alert("Tally 필드 목록", report, ui.ButtonSet.OK);
-}
-
-// ─── 자동 동기화 트리거 ───────────────────────────
-function setupTrigger() {
-  removeTriggers();
-  ScriptApp.newTrigger("syncAll").timeBased().everyMinutes(10).create();
-  SpreadsheetApp.getUi().alert("✅ 10분마다 자동 동기화가 설정되었습니다.");
-}
-
-function removeTriggers() {
-  ScriptApp.getProjectTriggers()
-    .filter(t => t.getHandlerFunction() === "syncAll")
-    .forEach(t => ScriptApp.deleteTrigger(t));
-}
-
-// ─── 유틸 ─────────────────────────────────────────
 function getOrCreateSheet(ss, name) {
   return ss.getSheetByName(name) || ss.insertSheet(name);
 }
@@ -256,4 +78,152 @@ function styleHeader(ws, numCols) {
     .setBackground("#D9E8FB")
     .setFontWeight("bold")
     .setHorizontalAlignment("center");
+}
+
+function saveRawPeer(ss, submissions) {
+  var ws   = getOrCreateSheet(ss, "팀원평가_로우");
+  var rows = [["번호","제출시간","피평가자","점수 (1~5)"]];
+  for (var i = 0; i < submissions.length; i++) {
+    var f = submissions[i].fields || [];
+    rows.push([
+      i + 1,
+      (submissions[i].createdAt || "").replace("T"," ").slice(0,19),
+      findValue(f, PEER_FIELD_EVALUATEE) || "",
+      findValue(f, PEER_FIELD_SCORE)     || "",
+    ]);
+  }
+  ws.clearContents();
+  ws.getRange(1, 1, rows.length, 4).setValues(rows);
+  styleHeader(ws, 4);
+  Logger.log("팀원평가_로우 저장: " + submissions.length + "건");
+}
+
+function saveRawTeam(ss, submissions) {
+  var ws   = getOrCreateSheet(ss, "팀별평가_로우");
+  var rows = [["번호","제출시간","평가자 조","평가 대상 조","점수 (1~5)","비고"]];
+  for (var i = 0; i < submissions.length; i++) {
+    var f         = submissions[i].fields || [];
+    var target    = findValue(f, TEAM_FIELD_TARGET)    || "";
+    var evaluator = findValue(f, TEAM_FIELD_EVALUATOR) || "";
+    var score     = findValue(f, TEAM_FIELD_SCORE)     || "";
+    rows.push([
+      i + 1,
+      (submissions[i].createdAt || "").replace("T"," ").slice(0,19),
+      evaluator, target, score,
+      String(evaluator) === String(target) ? "자기평가 제외" : "",
+    ]);
+  }
+  ws.clearContents();
+  ws.getRange(1, 1, rows.length, 6).setValues(rows);
+  styleHeader(ws, 6);
+  Logger.log("팀별평가_로우 저장: " + submissions.length + "건");
+}
+
+function updatePeerScores(ss, submissions) {
+  var scores = {};
+  var unmatched = 0;
+  for (var i = 0; i < submissions.length; i++) {
+    var f         = submissions[i].fields || [];
+    var evaluatee = findValue(f, PEER_FIELD_EVALUATEE);
+    var scoreRaw  = findValue(f, PEER_FIELD_SCORE);
+    if (evaluatee && scoreRaw !== null && scoreRaw !== "") {
+      var score = parseFloat(scoreRaw);
+      if (!isNaN(score)) {
+        if (!scores[evaluatee]) scores[evaluatee] = [];
+        scores[evaluatee].push(score);
+      }
+    } else { unmatched++; }
+  }
+  if (unmatched) Logger.log("팀원 평가 매핑 실패: " + unmatched + "건");
+  var ws = ss.getSheetByName("최종점수");
+  for (var i = 0; i < STUDENTS.length; i++) {
+    var name = STUDENTS[i][1];
+    var arr  = scores[name] || [];
+    var avg  = arr.length ? Math.round(arr.reduce(function(a,b){return a+b;},0)/arr.length*100)/100 : "";
+    ws.getRange(6 + i, 3).setValue(avg);
+  }
+  Logger.log("최종점수 C열 업데이트 완료");
+}
+
+function updateTeamScores(ss, submissions) {
+  var scores = {};
+  var unmatched = 0;
+  for (var i = 0; i < submissions.length; i++) {
+    var f         = submissions[i].fields || [];
+    var targetRaw = findValue(f, TEAM_FIELD_TARGET);
+    var evalRaw   = findValue(f, TEAM_FIELD_EVALUATOR);
+    var scoreRaw  = findValue(f, TEAM_FIELD_SCORE);
+    if (targetRaw && scoreRaw !== null && scoreRaw !== "") {
+      var target    = parseInt(targetRaw);
+      var evaluator = evalRaw ? parseInt(evalRaw) : null;
+      var score     = parseFloat(scoreRaw);
+      if (!isNaN(target) && !isNaN(score) && evaluator !== target) {
+        if (!scores[target]) scores[target] = [];
+        scores[target].push(score);
+      }
+    } else { unmatched++; }
+  }
+  if (unmatched) Logger.log("팀별 평가 매핑 실패: " + unmatched + "건");
+  var ws = ss.getSheetByName("팀점수입력");
+  for (var i = 1; i <= 9; i++) {
+    var arr = scores[i] || [];
+    var avg = arr.length ? Math.round(arr.reduce(function(a,b){return a+b;},0)/arr.length*100)/100 : "";
+    ws.getRange(3 + i, 6).setValue(avg);
+  }
+  Logger.log("팀점수입력 F열 업데이트 완료");
+}
+
+function syncAll() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet()
+        || SpreadsheetApp.openById(SPREADSHEET_ID);
+
+  try { ss.toast("Tally에서 데이터 가져오는 중...", "📊 동기화", 60); } catch(e) {}
+
+  Logger.log("=== 동기화 시작 ===");
+
+  var peerSubs = fetchSubmissions(FORM_PEER_EVAL);
+  Logger.log("팀원 평가표: " + peerSubs.length + "건");
+  saveRawPeer(ss, peerSubs);
+  updatePeerScores(ss, peerSubs);
+
+  var teamSubs = fetchSubmissions(FORM_TEAM_EVAL);
+  Logger.log("팀별 평가표: " + teamSubs.length + "건");
+  saveRawTeam(ss, teamSubs);
+  updateTeamScores(ss, teamSubs);
+
+  Logger.log("=== 동기화 완료 ===");
+  try { ss.toast("완료!", "✅", 5); } catch(e) {}
+}
+
+function inspectFields() {
+  var report = "각 폼의 실제 질문 제목 목록\n";
+  var forms = [[FORM_PEER_EVAL,"팀원 평가표"],[FORM_TEAM_EVAL,"팀별 평가표"]];
+  for (var fi = 0; fi < forms.length; fi++) {
+    var formId   = forms[fi][0];
+    var formName = forms[fi][1];
+    report += "\n▶ " + formName + "\n";
+    var subs = fetchSubmissions(formId);
+    if (!subs.length) { report += "  응답 없음\n"; continue; }
+    report += "  응답 " + subs.length + "건\n";
+    var fields = subs[0].fields || [];
+    for (var i = 0; i < fields.length; i++) {
+      report += '  • "' + fields[i].label + '" → ' + JSON.stringify(fields[i].value) + "\n";
+    }
+  }
+  SpreadsheetApp.getUi().alert("Tally 필드 목록", report, SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+function setupTrigger() {
+  removeTriggers();
+  ScriptApp.newTrigger("syncAll").timeBased().everyMinutes(10).create();
+  SpreadsheetApp.getUi().alert("✅ 10분마다 자동 동기화 설정 완료");
+}
+
+function removeTriggers() {
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === "syncAll") {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
 }
