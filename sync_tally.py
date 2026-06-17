@@ -71,13 +71,16 @@ def fetch_submissions(form_id: str) -> list[dict]:
     return [s for s in all_submissions if s.get("isCompleted")]
 
 
-def find_value(fields: list, keyword: str):
+def find_value(fields: list, keyword: str, debug: bool = False):
     for f in fields:
         if keyword.lower() in f.get("label", "").lower():
             val = f.get("value")
             if isinstance(val, list):
                 return val[0] if val else None
             return val
+    if debug:
+        labels = [f.get("label") for f in fields]
+        print(f"    ⚠ '{keyword}' 매핑 실패. 실제 필드 목록: {labels}")
     return None
 
 
@@ -147,17 +150,25 @@ def save_team_raw(ss, submissions: list[dict]):
 
 
 # ─── 집계 및 시트 업데이트 ────────────────────────────────────
-def calc_and_update_peer(ss, submissions: list[dict]):
+def calc_and_update_peer(ss, submissions: list[dict], debug: bool = False):
     scores: dict[str, list[float]] = defaultdict(list)
+    unmatched = 0
     for sub in submissions:
         fields    = sub.get("fields", [])
-        evaluatee = find_value(fields, PEER_FIELD_EVALUATEE)
-        score_raw = find_value(fields, PEER_FIELD_SCORE)
+        evaluatee = find_value(fields, PEER_FIELD_EVALUATEE, debug)
+        score_raw = find_value(fields, PEER_FIELD_SCORE, debug)
         if evaluatee and score_raw is not None:
             try:
                 scores[str(evaluatee)].append(float(score_raw))
+                if debug:
+                    print(f"    → {evaluatee}: {score_raw}")
             except (ValueError, TypeError):
                 pass
+        else:
+            unmatched += 1
+
+    if unmatched:
+        print(f"  ⚠ 팀원 평가: {unmatched}건 필드 매핑 실패 (--inspect로 필드명 확인)")
 
     peer_avg = {name: round(sum(s) / len(s), 2) for name, s in scores.items() if s}
 
@@ -171,21 +182,31 @@ def calc_and_update_peer(ss, submissions: list[dict]):
     return peer_avg
 
 
-def calc_and_update_team(ss, submissions: list[dict]):
+def calc_and_update_team(ss, submissions: list[dict], debug: bool = False):
     scores: dict[int, list[float]] = defaultdict(list)
+    unmatched = 0
     for sub in submissions:
         fields    = sub.get("fields", [])
-        target_r  = find_value(fields, TEAM_FIELD_TARGET)
-        eval_r    = find_value(fields, TEAM_FIELD_EVALUATOR)
-        score_raw = find_value(fields, TEAM_FIELD_SCORE)
+        target_r  = find_value(fields, TEAM_FIELD_TARGET, debug)
+        eval_r    = find_value(fields, TEAM_FIELD_EVALUATOR, debug)
+        score_raw = find_value(fields, TEAM_FIELD_SCORE, debug)
         if target_r and score_raw is not None:
             try:
                 target = int(target_r)
                 evaluator = int(eval_r) if eval_r else None
                 if evaluator != target:
                     scores[target].append(float(score_raw))
+                    if debug:
+                        print(f"    → {evaluator}조→{target}조: {score_raw}")
+                elif debug:
+                    print(f"    → {target}조 자기평가 제외")
             except (ValueError, TypeError):
                 pass
+        else:
+            unmatched += 1
+
+    if unmatched:
+        print(f"  ⚠ 팀별 평가: {unmatched}건 필드 매핑 실패 (--inspect로 필드명 확인)")
 
     team_avg = {t: round(sum(s) / len(s), 2) for t, s in scores.items() if s}
 
@@ -214,7 +235,7 @@ def inspect_forms():
 
 
 # ─── 메인 ────────────────────────────────────────────────────
-def sync_once():
+def sync_once(debug: bool = False):
     ts = time.strftime("%H:%M:%S")
     print(f"\n[{ts}] Tally → Google Sheets 동기화 중...")
 
@@ -224,13 +245,13 @@ def sync_once():
     peer_subs = fetch_submissions(FORM_PEER_EVAL)
     print(f"  팀원 평가표: {len(peer_subs)}건 수신")
     save_peer_raw(ss, peer_subs)
-    peer_avg = calc_and_update_peer(ss, peer_subs)
+    peer_avg = calc_and_update_peer(ss, peer_subs, debug)
 
     # 팀별 평가표
     team_subs = fetch_submissions(FORM_TEAM_EVAL)
     print(f"  팀별 평가표: {len(team_subs)}건 수신")
     save_team_raw(ss, team_subs)
-    team_avg = calc_and_update_team(ss, team_subs)
+    team_avg = calc_and_update_team(ss, team_subs, debug)
 
     print(f"\n  팀원 평균: {peer_avg}")
     print(f"  조별 평균: {team_avg}")
@@ -239,8 +260,9 @@ def sync_once():
 
 def main():
     parser = argparse.ArgumentParser(description="Tally → Google Sheets 동기화")
-    parser.add_argument("--watch", type=int, metavar="초", help="N초마다 자동 반복 동기화")
+    parser.add_argument("--watch",   type=int, metavar="초", help="N초마다 자동 반복 동기화")
     parser.add_argument("--inspect", action="store_true", help="Tally 폼 필드명 확인")
+    parser.add_argument("--debug",   action="store_true", help="상세 로그 출력")
     args = parser.parse_args()
 
     if args.inspect:
@@ -251,12 +273,12 @@ def main():
         print(f"자동 동기화 모드: {args.watch}초마다 실행 (Ctrl+C로 종료)")
         while True:
             try:
-                sync_once()
+                sync_once(args.debug)
             except Exception as e:
                 print(f"  오류: {e}")
             time.sleep(args.watch)
     else:
-        sync_once()
+        sync_once(args.debug)
 
 
 if __name__ == "__main__":
