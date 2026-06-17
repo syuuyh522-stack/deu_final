@@ -208,8 +208,21 @@ def row_height(ws, row_index, height_px):
     }
 
 
+SPREADSHEET_ID = "1tqihK7NxqEEqohQqFlDsjNMXz531K1cpCtwRvni2uk8"
+
+
+def get_or_create_sheet(spreadsheet, title, rows=50, cols=10):
+    """시트가 있으면 반환, 없으면 새로 생성"""
+    try:
+        ws = spreadsheet.worksheet(title)
+        ws.clear()
+        return ws
+    except gspread.WorksheetNotFound:
+        return spreadsheet.add_worksheet(title=title, rows=rows, cols=cols)
+
+
 def main():
-    parser = argparse.ArgumentParser(description="미인디 기말평가 점수집계표 Google Sheets 생성")
+    parser = argparse.ArgumentParser(description="미인디 기말평가 점수집계표 Google Sheets 채우기")
     parser.add_argument(
         "--creds",
         default=os.environ.get("GOOGLE_CREDENTIALS", "credentials.json"),
@@ -240,17 +253,19 @@ def main():
     creds = Credentials.from_service_account_file(args.creds, scopes=SCOPES)
     gc = gspread.authorize(creds)
 
-    print("스프레드시트 생성 중...")
-    spreadsheet = gc.create("동의대학교 미인디 기말평가 점수집계표")
-
-    # 기본 시트 이름 변경
-    team_sheet = spreadsheet.sheet1
-    team_sheet.update_title("팀점수입력")
-
-    # 두 번째 시트 추가
-    final_sheet = spreadsheet.add_worksheet(title="최종점수", rows=50, cols=10)
+    print(f"기존 스프레드시트 열기 중... (ID: {SPREADSHEET_ID})")
+    try:
+        spreadsheet = gc.open_by_key(SPREADSHEET_ID)
+    except gspread.SpreadsheetNotFound:
+        print("오류: 스프레드시트를 찾을 수 없습니다.")
+        print("서비스 계정 이메일을 해당 구글 시트의 편집자로 공유했는지 확인하세요.")
+        print(f"서비스 계정 이메일은 credentials.json 안의 'client_email' 값입니다.")
+        sys.exit(1)
 
     print("시트 구성 중...")
+    team_sheet = get_or_create_sheet(spreadsheet, "팀점수입력")
+    final_sheet = get_or_create_sheet(spreadsheet, "최종점수")
+
     setup_team_sheet(team_sheet)
     setup_final_sheet(final_sheet)
 
